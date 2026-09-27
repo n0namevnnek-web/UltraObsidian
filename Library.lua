@@ -23245,5 +23245,402 @@ function Library:Unload()
     getgenv().Library = nil
 end
 
+--// NNVN WindUI compatibility layer
+--// Adds WindUI-style aliases without changing UltraObsidian's visual layout.
+if not Library.__NNVN_WindUICompatInstalled then
+    Library.__NNVN_WindUICompatInstalled = true
+
+    local OriginalCreateWindow = Library.CreateWindow
+
+    local function compatTitle(Info, Fallback)
+        if typeof(Info) == "table" then
+            return Info.Title or Info.Name or Info.Text or Fallback
+        end
+        return Info or Fallback
+    end
+
+    local function compatIcon(Info)
+        if typeof(Info) ~= "table" then return nil end
+        return Info.Icon or Info.IconName
+    end
+
+    local function compatDesc(Info)
+        if typeof(Info) ~= "table" then return nil end
+        return Info.Desc or Info.Description or Info.Content
+    end
+
+    local function compatElement(Element, Title)
+        if typeof(Element) ~= "table" then return Element end
+        Element.__NNVN_Title = Element.__NNVN_Title or Title
+
+        if not Element.SetTitle then
+            Element.SetTitle = function(self, NewTitle)
+                self.__NNVN_Title = tostring(NewTitle or "")
+                if self.SetText then
+                    self:SetText(self.__NNVN_Title)
+                elseif self.Text ~= nil then
+                    self.Text = self.__NNVN_Title
+                end
+            end
+        end
+
+        if not Element.SetDesc then
+            Element.SetDesc = function(self, NewDesc)
+                local Text = tostring(NewDesc or "")
+                if self.__NNVN_Title and self.__NNVN_Title ~= "" then
+                    Text = tostring(self.__NNVN_Title) .. "\n" .. Text
+                end
+                if self.SetText then
+                    self:SetText(Text)
+                elseif self.SetValue then
+                    self:SetValue(Text)
+                elseif self.Text ~= nil then
+                    self.Text = Text
+                end
+            end
+        end
+
+        if not Element.Set then
+            Element.Set = function(self, Value)
+                if self.SetValue then
+                    return self:SetValue(Value)
+                elseif self.SetText then
+                    return self:SetText(tostring(Value))
+                end
+            end
+        end
+
+        return Element
+    end
+
+    local function compatGroup(Group)
+        if typeof(Group) ~= "table" or Group.__NNVN_WindUICompatGroup then
+            return Group
+        end
+        Group.__NNVN_WindUICompatGroup = true
+
+        local OriginalAddButton = Group.AddButton
+        local OriginalAddToggle = Group.AddToggle
+        local OriginalAddDropdown = Group.AddDropdown
+        local OriginalAddInput = Group.AddInput
+        local OriginalAddSlider = Group.AddSlider
+        local OriginalAddLabel = Group.AddLabel
+        local OriginalAddDivider = Group.AddDivider
+        local OriginalAddImage = Group.AddImage
+        local OriginalAddDiscordBox = Group.AddDiscordBox
+
+        function Group:AddParagraph(Info)
+            Info = Info or {}
+            local Title = tostring(compatTitle(Info, "Info") or "Info")
+            local Desc = tostring(compatDesc(Info) or "")
+            if OriginalAddLabel then
+                local Label = OriginalAddLabel(self, {
+                    Text = Title .. (Desc ~= "" and ("\n" .. Desc) or ""),
+                    DoesWrap = true,
+                    Size = Info.Size or 14,
+                    Visible = Info.Visible,
+                })
+                return compatElement(Label, Title)
+            end
+            return compatElement({}, Title)
+        end
+        Group.Paragraph = Group.AddParagraph
+        Group.AddLabelCompat = Group.AddParagraph
+
+        function Group:AddButton(Info, Callback)
+            if OriginalAddButton and (typeof(Info) == "table" or Callback ~= nil) then
+                local Data = typeof(Info) == "table" and Info or { Title = tostring(Info or "Button"), Callback = Callback }
+                return compatElement(OriginalAddButton(self, {
+                    Text = Data.Text or Data.Title or Data.Name or "Button",
+                    Func = Data.Func or Data.Callback or function() end,
+                    Tooltip = Data.Tooltip or Data.Desc or Data.Content,
+                    Disabled = Data.Disabled == true,
+                    Visible = Data.Visible,
+                }), Data.Text or Data.Title or Data.Name)
+            elseif OriginalAddButton then
+                return compatElement(OriginalAddButton(self, Info, Callback), tostring(Info or "Button"))
+            end
+        end
+        Group.Button = Group.AddButton
+
+        function Group:AddToggle(Id, Info)
+            if typeof(Id) == "table" then
+                Info, Id = Id, nil
+            end
+            Info = Info or {}
+            if OriginalAddToggle then
+                local Title = Info.Text or Info.Title or Info.Name or tostring(Id or "Toggle")
+                return compatElement(OriginalAddToggle(self, Id or Title, {
+                    Text = Title,
+                    Default = Info.Default == true or Info.Value == true,
+                    Callback = Info.Callback or Info.Changed or function() end,
+                    Tooltip = Info.Tooltip or Info.Desc or Info.Content,
+                    Disabled = Info.Disabled == true,
+                    Visible = Info.Visible,
+                }), Title)
+            end
+        end
+        Group.Toggle = function(self, Info) return self:AddToggle(Info) end
+        Group.AddCheckbox = Group.AddToggle
+        Group.Checkbox = Group.Toggle
+
+        function Group:AddDropdown(Id, Info)
+            if typeof(Id) == "table" then
+                Info, Id = Id, nil
+            end
+            Info = Info or {}
+            if OriginalAddDropdown then
+                local Title = Info.Text or Info.Title or Info.Name or tostring(Id or "Dropdown")
+                local Default = Info.Default or Info.Value
+                if typeof(Default) == "table" and not (Info.Multi or Info.Multiple or Info.MultiSelect) then
+                    Default = Default[1] or Default.Value
+                end
+                return compatElement(OriginalAddDropdown(self, Id or Title, {
+                    Text = Title,
+                    Values = Info.Values or Info.Options or {},
+                    Default = Default,
+                    Multi = Info.Multi == true or Info.Multiple == true or Info.MultiSelect == true,
+                    Searchable = Info.Searchable ~= false,
+                    Callback = Info.Callback or Info.Changed or function() end,
+                    Tooltip = Info.Tooltip or Info.Desc or Info.Content,
+                    Disabled = Info.Disabled == true,
+                    Visible = Info.Visible,
+                }), Title)
+            end
+        end
+        Group.Dropdown = function(self, Info) return self:AddDropdown(Info) end
+
+        function Group:AddInput(Id, Info)
+            if typeof(Id) == "table" then
+                Info, Id = Id, nil
+            end
+            Info = Info or {}
+            if OriginalAddInput then
+                local Title = Info.Text or Info.Title or Info.Name or tostring(Id or "Input")
+                return compatElement(OriginalAddInput(self, Id or Title, {
+                    Text = Title,
+                    Default = tostring(Info.Default or Info.Value or ""),
+                    Placeholder = Info.Placeholder or "",
+                    Numeric = Info.Numeric == true,
+                    Finished = Info.Finished == true,
+                    Callback = Info.Callback or Info.Changed or function() end,
+                    Tooltip = Info.Tooltip or Info.Desc or Info.Content,
+                    Disabled = Info.Disabled == true,
+                    Visible = Info.Visible,
+                }), Title)
+            end
+        end
+        Group.Input = function(self, Info) return self:AddInput(Info) end
+
+        function Group:AddSlider(Id, Info)
+            if typeof(Id) == "table" then
+                Info, Id = Id, nil
+            end
+            Info = Info or {}
+            if OriginalAddSlider then
+                local Value = Info.Value
+                local Min = Info.Min or (typeof(Value) == "table" and Value.Min) or 0
+                local Max = Info.Max or (typeof(Value) == "table" and Value.Max) or 100
+                local Default = Info.Default or (typeof(Value) == "table" and Value.Default) or Value or Min
+                local Title = Info.Text or Info.Title or Info.Name or tostring(Id or "Slider")
+                return compatElement(OriginalAddSlider(self, Id or Title, {
+                    Text = Title,
+                    Min = tonumber(Min) or 0,
+                    Max = tonumber(Max) or 100,
+                    Default = tonumber(Default) or tonumber(Min) or 0,
+                    Rounding = tonumber(Info.Rounding or Info.Increment) or 1,
+                    Compact = Info.Compact == true,
+                    Callback = Info.Callback or Info.Changed or function() end,
+                    Tooltip = Info.Tooltip or Info.Desc or Info.Content,
+                    Disabled = Info.Disabled == true,
+                    Visible = Info.Visible,
+                }), Title)
+            end
+        end
+        Group.Slider = function(self, Info) return self:AddSlider(Info) end
+
+        function Group:AddSeperator(Info)
+            if OriginalAddDivider then
+                local Text = typeof(Info) == "table" and (Info.Text or Info.Title or Info[1]) or Info
+                return OriginalAddDivider(self, Text and tostring(Text) ~= "" and { Text = tostring(Text) } or nil)
+            end
+        end
+        Group.AddSeparator = Group.AddSeperator
+        Group.AddDivider = Group.AddSeperator
+
+        function Group:AddImage(Id, Info)
+            if typeof(Id) == "table" then
+                Info, Id = Id, nil
+            end
+            Info = Info or {}
+            if OriginalAddImage then
+                return compatElement(OriginalAddImage(self, Id or Info.Title or "Image", {
+                    Image = Info.Image,
+                    Height = Info.Height,
+                    Transparency = Info.Transparency,
+                    Color = Info.Color,
+                    ScaleType = Info.ScaleType,
+                    Visible = Info.Visible,
+                }), Info.Title or "Image")
+            end
+        end
+        Group.Image = function(self, Info) return self:AddImage(Info) end
+
+        function Group:AddDiscordBox(Id, Info)
+            if typeof(Id) == "table" then
+                Info, Id = Id, nil
+            end
+            Info = Info or {}
+            if OriginalAddDiscordBox then
+                return compatElement(OriginalAddDiscordBox(self, Id or Info.Title or "Discord", Info), Info.Title or "Discord")
+            end
+            return self:AddParagraph({
+                Title = Info.Title or "Discord",
+                Desc = Info.Subtitle or Info.Desc or Info.Link or "",
+            })
+        end
+        Group.DiscordBox = function(self, Info) return self:AddDiscordBox(Info) end
+
+        return Group
+    end
+
+    local function compatTab(Tab)
+        if typeof(Tab) ~= "table" or Tab.__NNVN_WindUICompatTab then
+            return Tab
+        end
+        Tab.__NNVN_WindUICompatTab = true
+
+        local OriginalAddGroupbox = Tab.AddGroupbox
+        local SideCounter = 0
+
+        function Tab:Section(Info)
+            Info = Info or {}
+            if typeof(Info) == "string" then
+                Info = { Title = Info }
+            end
+            SideCounter += 1
+            local Side = Info.Side or (SideCounter % 2 == 1 and 1 or 2)
+            local Group
+            if OriginalAddGroupbox then
+                Group = OriginalAddGroupbox(self, {
+                    Name = Info.Name or Info.Title or "Section",
+                    IconName = Info.IconName or Info.Icon,
+                    Description = Info.Description or Info.Desc,
+                    Side = Side,
+                    Visible = Info.Visible,
+                    Collapsed = Info.Collapsed == true or Info.Open == false or Info.Opened == false or Info.DefaultOpen == false,
+                    DisableCollapsing = Info.DisableCollapsing == true,
+                })
+            end
+            return compatGroup(Group)
+        end
+        Tab.AddSection = Tab.Section
+
+        local CompatAddGroupbox = function(Self, Info, IconName, Visible, Collapsed, DisableCollapsing)
+            if typeof(Info) == "table" then
+                local Group = OriginalAddGroupbox and OriginalAddGroupbox(Self, Info)
+                return compatGroup(Group)
+            end
+            local Group = OriginalAddGroupbox and OriginalAddGroupbox(Self, {
+                Name = tostring(Info or "Section"),
+                IconName = IconName,
+                Visible = Visible,
+                Collapsed = Collapsed,
+                DisableCollapsing = DisableCollapsing,
+            })
+            return compatGroup(Group)
+        end
+        Tab.AddGroupbox = CompatAddGroupbox
+
+        local OriginalLeft = Tab.AddLeftGroupbox
+        local OriginalRight = Tab.AddRightGroupbox
+        function Tab:AddLeftGroupbox(Name, IconName, Visible, Collapsed, DisableCollapsing)
+            if OriginalLeft then
+                return compatGroup(OriginalLeft(self, Name, IconName, Visible, Collapsed, DisableCollapsing))
+            end
+            return compatGroup(OriginalAddGroupbox and OriginalAddGroupbox(self, { Side = 1, Name = Name, IconName = IconName, Visible = Visible, Collapsed = Collapsed, DisableCollapsing = DisableCollapsing }))
+        end
+        function Tab:AddRightGroupbox(Name, IconName, Visible, Collapsed, DisableCollapsing)
+            if OriginalRight then
+                return compatGroup(OriginalRight(self, Name, IconName, Visible, Collapsed, DisableCollapsing))
+            end
+            return compatGroup(OriginalAddGroupbox and OriginalAddGroupbox(self, { Side = 2, Name = Name, IconName = IconName, Visible = Visible, Collapsed = Collapsed, DisableCollapsing = DisableCollapsing }))
+        end
+
+        return Tab
+    end
+
+    function Library:CreateWindow(WindowInfo)
+        WindowInfo = WindowInfo or {}
+        if typeof(WindowInfo) == "table" then
+            WindowInfo.Name = WindowInfo.Name or WindowInfo.Title
+            WindowInfo.Title = WindowInfo.Title or WindowInfo.Name
+            WindowInfo.Footer = WindowInfo.Footer or WindowInfo.Author
+            WindowInfo.MinSidebarWidth = WindowInfo.MinSidebarWidth or WindowInfo.SideBarWidth or WindowInfo.SidebarWidth
+        end
+
+        local Window = OriginalCreateWindow(self, WindowInfo)
+        if typeof(Window) ~= "table" then return Window end
+
+        local OriginalAddTab = Window.AddTab
+        function Window:AddTab(...)
+            local Args = { ... }
+            if #Args == 1 and typeof(Args[1]) == "table" then
+                Args[1].Name = Args[1].Name or Args[1].Title
+                Args[1].Icon = Args[1].Icon or Args[1].IconName
+            elseif typeof(Args[1]) == "string" then
+                Args[1] = { Name = Args[1], Icon = Args[2], Description = Args[3], Order = Args[4] }
+            end
+            return compatTab(OriginalAddTab(self, Args[1]))
+        end
+        Window.Tab = function(Self, Info)
+            if typeof(Info) == "string" then
+                Info = { Title = Info }
+            end
+            Info = Info or {}
+            return Self:AddTab({
+                Name = Info.Name or Info.Title or "Tab",
+                Icon = Info.Icon or Info.IconName,
+                Description = Info.Desc or Info.Description,
+                Order = Info.Order,
+            })
+        end
+
+        if not Window.EditOpenButton then
+            Window.EditOpenButton = function() end
+        end
+        if not Window.Tag then
+            Window.Tag = function() end
+        end
+        if not Window.SetIcon then
+            Window.SetIcon = function() end
+        end
+
+        return Window
+    end
+
+    if not Library.SetTheme then
+        Library.SetTheme = function(_, Name)
+            if Library.ThemeManager and Library.ThemeManager.SetTheme then
+                pcall(function() Library.ThemeManager:SetTheme(Name) end)
+            end
+        end
+    end
+    if not Library.GetCurrentTheme then
+        Library.GetCurrentTheme = function()
+            return Library.Theme or "Ultra Default"
+        end
+    end
+    if not Library.GetThemes then
+        Library.GetThemes = function()
+            return {
+                ["Ultra Default"] = true,
+                ["Midnight"] = true,
+                ["Dark"] = true,
+            }
+        end
+    end
+end
+
 getgenv().Library = Library
 return Library
