@@ -484,6 +484,8 @@ local Templates = {
 
         ShowMobileButtons = true,
         MobileButtonsSide = "Left",
+        MobileOptimized = true,
+        MobileCompactSidebar = true,
 
         UnlockMouseWhileOpen = true,
 
@@ -503,6 +505,8 @@ local Templates = {
 
         --// Background \\--
         BackgroundImage = "",
+        BackgroundImageTransparency = 0.75,
+        BackgroundImageScaleType = Enum.ScaleType.Crop,
 
         --// Animations \\--
         Animations = {
@@ -4031,12 +4035,16 @@ function Library:AddDraggableButton(...)
     local Func
     local ExcludeScaling
     local ExcludeDragging
+    local Icon
+    local ButtonSize
 
     if typeof(Params) == "table" then
         Text = Params.Text
         Func = Params.Callback or Params.Func
         ExcludeScaling = Params.ExcludeScaling
         ExcludeDragging = Params.ExcludeDragging
+        Icon = Params.Icon
+        ButtonSize = Params.Size
     elseif typeof(Params) == "string" then
         Text = Params
         Func = select(2, ...)
@@ -4048,6 +4056,7 @@ function Library:AddDraggableButton(...)
         Connections = {},
         Destroyed = false
     }
+    local IconImage
 
     local Button = New("TextButton", {
         BackgroundColor3 = "BackgroundColor",
@@ -4097,15 +4106,40 @@ function Library:AddDraggableButton(...)
         end)
     end)
 
-    function DraggableButton:SetText(Text: string)
+    function DraggableButton:SetText(NewText: string)
+        Text = tostring(NewText or "")
         local X, Y = Library:GetTextBounds(Text, Library.Scheme.Font, 16)
 
-        Button.Text = Text
-        Button.Size = UDim2.fromOffset(X * 2, Y * 2)
+        Button.Text = IconImage and "" or Text
+        Button.Size = ButtonSize or (IconImage and UDim2.fromOffset(44, 44) or UDim2.fromOffset(X * 2, Y * 2))
+    end
+
+    function DraggableButton:SetIcon(NewIcon: string?)
+        Icon = NewIcon
+        if not Icon or Trim(tostring(Icon)) == "" then
+            if IconImage then IconImage.Visible = false end
+            DraggableButton:SetText(Text)
+            return
+        end
+        local CustomIcon = Library:GetCustomIcon(Icon)
+        if not CustomIcon then return end
+        IconImage = IconImage or New("ImageLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundTransparency = 1,
+            ImageColor3 = "FontColor",
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(21, 21),
+            ZIndex = 2,
+            Parent = Button,
+        })
+        IconImage.Visible = true
+        Library:ApplyLucideIcon(IconImage, CustomIcon)
+        DraggableButton:SetText(Text)
     end
 
     Library:MakeDraggable(Button, Button, true)
     DraggableButton:SetText(Text)
+    DraggableButton:SetIcon(Icon)
     DraggableButton.Button = Button
 
     if not table.find(Library.DraggableElements, Button) then
@@ -16366,6 +16400,24 @@ function Library:CreateWindow(WindowInfo)
         ViewportSize = ReadViewportSize()
     end
 
+    if Library.IsMobile and WindowInfo.MobileOptimized ~= false then
+        local SafeWidth = math.max(320, ViewportSize.X - 24)
+        local SafeHeight = math.max(260, ViewportSize.Y - 72)
+        WindowInfo.Size = UDim2.fromOffset(SafeWidth, SafeHeight)
+        WindowInfo.Position = UDim2.fromOffset(12, 48)
+        WindowInfo.Center = true
+        WindowInfo.CornerRadius = math.max(8, WindowInfo.CornerRadius)
+        WindowInfo.EnableCompacting = true
+        WindowInfo.DisableCompactingSnap = false
+        WindowInfo.SidebarCompacted = WindowInfo.MobileCompactSidebar ~= false and ViewportSize.X < 650
+        WindowInfo.MinSidebarWidth = math.max(132, WindowInfo.MinSidebarWidth)
+        WindowInfo.SidebarCompactWidth = math.max(52, WindowInfo.SidebarCompactWidth)
+        WindowInfo.SearchbarSize = UDim2.fromScale(ViewportSize.X < 650 and 0.48 or 0.36, 1)
+        if WindowInfo.Font == Enum.Font.Code then
+            WindowInfo.Font = Enum.Font.Gotham
+        end
+    end
+
     local MaxX = ViewportSize.X - 64
     local MaxY = ViewportSize.Y - 64
 
@@ -16521,10 +16573,10 @@ function Library:CreateWindow(WindowInfo)
             Active = false,
             Position = UDim2.fromScale(0, 0),
             Size = UDim2.fromScale(1, 1),
-            ScaleType = Enum.ScaleType.Stretch,
+            ScaleType = WindowInfo.BackgroundImageScaleType,
             ZIndex = Overlay.ZIndex + 1,
             BackgroundTransparency = 1,
-            ImageTransparency = 0.75,
+            ImageTransparency = math.clamp(tonumber(WindowInfo.BackgroundImageTransparency) or 0.75, 0, 1),
             Visible = false,
             Parent = ScreenGui,
         })
@@ -17650,6 +17702,18 @@ function Library:CreateWindow(WindowInfo)
 
         HasBackgroundImage = ValidIcon
         WindowInfo.BackgroundImage = Image
+    end
+
+    function Window:SetBackgroundImageTransparency(Transparency: number)
+        local Value = math.clamp(tonumber(Transparency) or 0.75, 0, 1)
+        BackgroundImage.ImageTransparency = Value
+        WindowInfo.BackgroundImageTransparency = Value
+    end
+
+    function Window:SetBackgroundImageScaleType(ScaleType: Enum.ScaleType)
+        if typeof(ScaleType) ~= "EnumItem" or ScaleType.EnumType ~= Enum.ScaleType then return end
+        BackgroundImage.ScaleType = ScaleType
+        WindowInfo.BackgroundImageScaleType = ScaleType
     end
 
     --// Glow \\--
@@ -22098,14 +22162,26 @@ function Library:CreateWindow(WindowInfo)
     end
 
     if Library.IsMobile then
-        local ToggleButton = Library:AddDraggableButton("Toggle", function()
-            Library:Toggle()
-        end, true, true)
+        local ToggleButton = Library:AddDraggableButton({
+            Text = "Menu",
+            Icon = "panel-left",
+            Size = UDim2.fromOffset(44, 44),
+            Callback = function() Library:Toggle() end,
+            ExcludeScaling = true,
+            ExcludeDragging = true,
+        })
 
-        local LockButton = Library:AddDraggableButton("Lock", function(self)
-            Library.CantDragForced = not Library.CantDragForced
-            self:SetText(Library.CantDragForced and "Unlock" or "Lock")
-        end, true, true)
+        local LockButton = Library:AddDraggableButton({
+            Text = "Lock",
+            Icon = "lock",
+            Size = UDim2.fromOffset(44, 44),
+            Callback = function(self)
+                Library.CantDragForced = not Library.CantDragForced
+                self:SetIcon(Library.CantDragForced and "lock-open" or "lock")
+            end,
+            ExcludeScaling = true,
+            ExcludeDragging = true,
+        })
 
         if WindowInfo.MobileButtonsSide == "Right" then
             ToggleButton.Button.AnchorPoint = Vector2.new(1, 0)
@@ -23245,6 +23321,38 @@ function Library:Unload()
     getgenv().Library = nil
 end
 
+Library.ModernPresets = {
+    Crimson = {
+        BackgroundColor = Color3.fromRGB(10, 7, 9),
+        MainColor = Color3.fromRGB(23, 12, 16),
+        AccentColor = Color3.fromRGB(235, 35, 58),
+        OutlineColor = Color3.fromRGB(73, 24, 34),
+        FontColor = Color3.fromRGB(246, 247, 250),
+        DarkColor = Color3.fromRGB(5, 3, 4),
+        Font = Font.fromEnum(Enum.Font.Gotham),
+    },
+    Graphite = {
+        BackgroundColor = Color3.fromRGB(12, 14, 18),
+        MainColor = Color3.fromRGB(23, 26, 33),
+        AccentColor = Color3.fromRGB(88, 145, 255),
+        OutlineColor = Color3.fromRGB(52, 58, 70),
+        FontColor = Color3.fromRGB(246, 248, 252),
+        DarkColor = Color3.fromRGB(6, 7, 10),
+        Font = Font.fromEnum(Enum.Font.Gotham),
+    },
+}
+
+function Library:ApplyModernPreset(Name: string)
+    local Preset = Library.ModernPresets[Name]
+    if not Preset then return false end
+    for Key, Value in Preset do
+        Library.Scheme[Key] = Value
+    end
+    Library.Theme = Name
+    if type(Library.UpdateColors) == "function" then Library:UpdateColors() end
+    return true
+end
+
 --// NNVN WindUI compatibility layer
 --// Adds WindUI-style aliases without changing UltraObsidian's visual layout.
 if not Library.__NNVN_WindUICompatInstalled then
@@ -23573,6 +23681,9 @@ if not Library.__NNVN_WindUICompatInstalled then
     function Library:CreateWindow(WindowInfo)
         WindowInfo = WindowInfo or {}
         if typeof(WindowInfo) == "table" then
+            if WindowInfo.Preset then
+                self:ApplyModernPreset(WindowInfo.Preset)
+            end
             WindowInfo.Name = WindowInfo.Name or WindowInfo.Title
             WindowInfo.Title = WindowInfo.Title or WindowInfo.Name
             WindowInfo.Footer = WindowInfo.Footer or WindowInfo.Author
